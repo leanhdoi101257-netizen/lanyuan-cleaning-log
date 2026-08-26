@@ -1,4 +1,4 @@
-/* global docx */
+/* global docx, supabase */
 (() => {
   'use strict';
 
@@ -7,6 +7,8 @@
   const state = { date: localDate(new Date()), log: null, taskIndex: 0, previewUrl: null, cardUrls: [] };
   let db;
   let backupInProgress = false;
+  let cloudClient = null;
+  let cloudReadyPromise = null;
 
   function localDate(value) {
     const date = new Date(value);
@@ -46,6 +48,9 @@
   async function putLog(log) {
     const saved = { ...log, updatedAt: new Date().toISOString() };
     await putLocal(saved);
+    // Never make a successful local save depend on network availability.  The
+    // same record stays on this phone and is retried on the next cloud sync.
+    void syncOneLogToCloud(saved).catch((error) => console.warn('Cloud sync will retry later.', error));
   }
   function deleteLocal(date) {
     return new Promise((resolve, reject) => {
@@ -62,8 +67,102 @@
     });
   }
 
+  function cloudSettings() {
+    const settings = window.CLEANING_LOG_CLOUD || {};
+    return { url: String(settings.url || '').replace(/\/$/, ''), anonKey: String(settings.anonKey || '') };
+  }
+  function cloudConfigured() {
+    const { url, anonKey } = cloudSettings();
+    return /^https:\/\/[\w-]+\.supabase\.co$/.test(url) && anonKey.length > 30 && !!window.supabase;
+  }
+  function setCloudInfo(text) {
+    const label = $('#cloudInfo');
+    if (label) label.textContent = text;
+  }
+  async function ensureCloudSession() {
+    if (!cloudConfigured()) throw new Error('云端资料库还没有设置完成');
+    if (cloudClient) return cloudClient;
+    if (!cloudReadyPromise) {
+      cloudReadyPromise = (async () => {
+        const { url, anonKey } = cloudSettings();
+        const client = supabase.createClient(url, anonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false } });
+        const { data: sessionData, error: sessionError } = await client.auth.getSession();
+        if (sessionError) throw sessionError;
+        if (!sessionData.session) {
+          const { error } = await client.auth.signInAnonymously();
+          if (error) throw error;
+        }
+        cloudClient = client;
+        return client;
+      })();
+    }
+    return cloudReadyPromise;
+  }
+  async function logForCloud(log) {
+    return {
+      date: log.date,
+      updatedAt: log.updatedAt || new Date().toISOString(),
+      tasks: await Promise.all(log.tasks.map(async (task) => ({
+        suggested: task.suggested || '', text: task.text || '', updatedAt: task.updatedAt || null,
+        image: task.image instanceof Blob ? await blobToDataUrl(task.image) : (typeof task.image === 'string' ? task.image : null)
+      })))
+    };
+  }
+  async function syncOneLogToCloud(log) {
+    if (!cloudConfigured() || !isRecorded(log)) return false;
+    const client = await ensureCloudSession();
+    const payload = await logForCloud(log);
+    const { error } = await client.from('cleaning_logs').upsert({ date: payload.date, payload }, { onConflict: 'device_id,date' });
+    if (error) throw error;
+    localStorage.setItem('cleaning-log-cloud-synced-at', payload.updatedAt);
+    setCloudInfo(`云端已保存：${formatFullDate(payload.date)}`);
+    return true;
+  }
+  async function remoteLogToLocal(payload) {
+    if (!payload || typeof payload.date !== 'string' || !Array.isArray(payload.tasks) || payload.tasks.length !== 8) return null;
+    return {
+      date: payload.date,
+      updatedAt: payload.updatedAt || null,
+      tasks: payload.tasks.map((task, index) => ({
+        suggested: task.suggested || APP.taskNames[index] || '', text: task.text || '', updatedAt: task.updatedAt || null,
+        image: typeof task.image === 'string' && task.image.startsWith('data:image/') ? dataUrlToBlob(task.image) : null
+      }))
+    };
+  }
+  async function restoreCloudLogs() {
+    if (!cloudConfigured()) { setCloudInfo('云端尚未设置：本机保存仍可正常使用'); return 0; }
+    const client = await ensureCloudSession();
+    const { data, error } = await client.from('cleaning_logs').select('payload').order('updated_at', { ascending: true });
+    if (error) throw error;
+    let restored = 0;
+    for (const row of data || []) {
+      const remote = await remoteLogToLocal(row.payload);
+      if (!remote) continue;
+      const local = await getLog(remote.date);
+      if (!isRecorded(local) || String(remote.updatedAt || '') > String(local.updatedAt || '')) { await putLocal(remote); restored += 1; }
+    }
+    setCloudInfo(restored ? `已从云端恢复 ${restored} 天记录` : '云端连接正常，手机记录会自动保存');
+    return restored;
+  }
+  async function syncAllToCloud() {
+    if (!cloudConfigured()) throw new Error('云端还没有设置完成。请先完成电脑上的 Supabase 设置。');
+    const logs = (await allLogs()).filter(isRecorded);
+    if (!logs.length) { showMessage('还没有可同步的记录', '先保存至少一项文字或照片。', '＋'); return; }
+    showBusy('正在保存到云端', `正在上传 0 / ${logs.length} 天记录`);
+    let done = 0;
+    for (const log of logs) { await syncOneLogToCloud(log); done += 1; busyProgress(Math.round(done / logs.length * 100), `已保存 ${done} / ${logs.length} 天记录`); }
+    hideBusy(); $('#backupDialog').close(); showMessage('云端已保存', `${logs.length} 天记录和照片已安全保存。电脑开机后会自动更新 Word。`, '☁');
+  }
+
   async function deleteLog(date) {
     await deleteLocal(date);
+    if (cloudConfigured()) {
+      try {
+        const client = await ensureCloudSession();
+        const { error } = await client.from('cleaning_logs').delete().eq('date', date);
+        if (error) throw error;
+      } catch (error) { console.warn('Cloud deletion will be retried manually.', error); }
+    }
   }
   function photoBackupEnabled() { return localStorage.getItem('cleaning-log-photo-backup') !== 'off'; }
   async function backupPhotosToComputer(log) {
@@ -329,14 +428,16 @@
     $('#taskDialog').addEventListener('close', resetPreview);
     $('#clearDayButton').onclick = () => showMessage('清空当天记录？', `${formatFullDate(state.date)}的文字和照片都会从这台手机移除。`, '！', { cancel: true, cancelText: '不清空', confirmText: '清空当天', onConfirm: async () => { await deleteLog(state.date); await showDate(state.date); } });
     document.querySelectorAll('[data-export]').forEach((button) => button.onclick = () => safely(exportWord, 'Word 没有生成成功'));
-    document.querySelectorAll('.nav-item').forEach((button) => button.onclick = () => { if (button.dataset.view === 'archive') safely(showArchive, '无法读取历史记录'); if (button.dataset.view === 'backup') safely(async () => { await updateStorageInfo(); $('#backupDialog').showModal(); }, '无法读取手机存储空间'); });
+    document.querySelectorAll('.nav-item').forEach((button) => button.onclick = () => { if (button.dataset.view === 'archive') safely(showArchive, '无法读取历史记录'); if (button.dataset.view === 'backup') safely(async () => { await updateStorageInfo(); if (!cloudConfigured()) setCloudInfo('云端尚未设置：当前仍只保存在本机'); $('#backupDialog').showModal(); }, '无法读取手机存储空间'); });
     $('#closeArchive').onclick = () => $('#archiveDialog').close(); $('#closeBackup').onclick = () => $('#backupDialog').close();
     $('#archiveList').onclick = (event) => { const row = event.target.closest('[data-open-date]'); if (row) { $('#archiveDialog').close(); safely(() => showDate(row.dataset.openDate), '无法打开这一天'); } };
-    $('#backupExport').onclick = () => safely(exportBackup, '备份没有导出成功'); $('#backupOneDrive').onclick = () => safely(shareBackupToOneDrive, 'OneDrive 同步文件没有准备成功'); $('#backupImport').onchange = (event) => safely(() => importBackup(event.target.files[0]), '备份没有导入成功');
-    $('#moreButton').onclick = () => showMessage('保洁日志', '保存当天记录后，点底部“备份”，再点“同步到 OneDrive”。电脑开机后会自动更新 Word。', 'i');
+    $('#backupExport').onclick = () => safely(exportBackup, '备份没有导出成功'); $('#backupCloud').onclick = () => safely(syncAllToCloud, '云端同步没有完成'); $('#backupImport').onchange = (event) => safely(() => importBackup(event.target.files[0]), '备份没有导入成功');
+    $('#moreButton').onclick = () => showMessage('保洁日志', '保存当天记录后会自动上传云端。也可以点底部“备份”立即同步；电脑开机后会自动更新 Word。', 'i');
   }
   async function init() {
-    await openDatabase(); await navigator.storage?.persist?.(); await normaliseExistingTasks(); bindEvents(); await showDate(state.date);
+    await openDatabase(); await navigator.storage?.persist?.(); await normaliseExistingTasks();
+    try { await restoreCloudLogs(); } catch (error) { console.warn('Cloud restore unavailable.', error); setCloudInfo('暂时无法连接云端：本机记录没有丢失，稍后会重试'); }
+    bindEvents(); await showDate(state.date);
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch((error) => console.warn('Service worker unavailable', error));
   }
   safely(init, '应用没有启动成功');
