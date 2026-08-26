@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f766e" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="保洁日志" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icon.svg" />
+    <link rel="stylesheet" href="styles.css?v=6" />
+    <title>航空城蘭园 · 保洁日志</title>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div>
+          <p class="eyebrow">航空城蘭园</p>
+          <h1>保洁服务日志</h1>
+        </div>
+        <button class="icon-button" id="moreButton" aria-label="更多功能">•••</button>
+      </header>
+
+      <section class="date-panel" aria-label="当前日期">
+        <button class="date-step" id="previousDay" aria-label="前一天">‹</button>
+        <button class="date-main" id="datePickerButton" aria-label="选择日期">
+          <span id="weekdayText">星期一</span>
+          <strong id="dateText">8月25日</strong>
+          <small id="yearText">2026年</small>
+        </button>
+        <button class="date-step" id="nextDay" aria-label="后一天">›</button>
+        <input id="dateInput" type="date" aria-label="选择日志日期" />
+      </section>
+
+      <section class="progress-card" aria-live="polite">
+        <div>
+          <p>今日记录</p>
+          <strong><span id="completedCount">0</span> / 8</strong>
+        </div>
+        <div class="progress-track"><span id="progressBar"></span></div>
+        <p id="progressMessage">先从第一项开始吧</p>
+      </section>
+
+      <section class="task-section" aria-labelledby="taskHeading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">当日现场</p>
+            <h2 id="taskHeading">八项工作记录</h2>
+          </div>
+          <button class="text-button" id="clearDayButton">清空当天</button>
+        </div>
+        <div class="task-grid" id="taskGrid"></div>
+      </section>
+
+      <section class="export-section" aria-labelledby="exportHeading">
+        <div class="section-heading compact">
+          <div>
+            <p class="eyebrow">Word 文件</p>
+            <h2 id="exportHeading">导出日志</h2>
+          </div>
+        </div>
+        <div class="export-actions">
+          <button class="export-button" data-export="master">
+            <span class="export-icon">↓</span><span><strong>下载已备份 Word</strong><small id="masterExportText">备份后可下载</small></span>
+          </button>
+        </div>
+        <p class="export-note">先点底部“备份”更新电脑原始 Word，再点这里直接下载。照片会自动压缩为适合 Word 表格的 JPEG 格式。</p>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="主导航">
+      <button class="nav-item active" data-view="log"><span>▣</span>日志</button>
+      <button class="nav-item" data-view="archive"><span>◷</span>记录</button>
+      <button class="nav-item" data-view="backup"><span>⇅</span>备份</button>
+    </nav>
+
+    <dialog id="taskDialog" class="sheet-dialog">
+      <form class="sheet" id="taskForm">
+        <div class="sheet-handle"></div>
+        <div class="sheet-title-row"><div><p class="eyebrow" id="taskOrdinal">第 1 项</p><h2 id="taskDialogTitle">工作内容</h2></div><button class="close-button" value="cancel" aria-label="关闭">×</button></div>
+        <label class="field-label" id="taskTextField">工作文字<textarea id="taskTextInput" maxlength="40" placeholder="可填写，也可留空"></textarea><small><span id="charCount">0</span>/40</small></label>
+        <div class="photo-editor">
+          <p class="field-label">现场照片 <em>每项 1 张</em></p>
+          <div class="photo-preview" id="photoPreview"><span>还没有照片</span></div>
+          <div class="photo-actions"><label class="photo-action primary"><input id="cameraInput" type="file" accept="image/*" capture="environment" />拍照</label><label class="photo-action"><input id="galleryInput" type="file" accept="image/*" />从相册选择</label></div>
+          <p class="image-hint">照片将裁切成横向并压缩，导出的 Word 与样例保持统一大小。</p>
+        </div>
+        <div class="sheet-footer"><button class="delete-button" id="deleteTaskPhoto" type="button">清除此项</button><button class="save-button" id="saveTaskButton" type="submit">保存这一项</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="archiveDialog" class="sheet-dialog"><section class="sheet archive-sheet"><div class="sheet-handle"></div><div class="sheet-title-row"><div><p class="eyebrow">已保存</p><h2>历史记录</h2></div><button class="close-button" id="closeArchive" aria-label="关闭">×</button></div><div id="archiveList" class="archive-list"></div></section></dialog>
+    <dialog id="dateDialog" class="sheet-dialog"><section class="sheet"><div class="sheet-handle"></div><div class="sheet-title-row"><div><p class="eyebrow">选择日期</p><h2 id="calendarTitle">2026年8月</h2></div><button class="close-button" id="closeCalendar" type="button" aria-label="关闭">×</button></div><div style="display:flex;gap:10px;margin:16px 0"><button class="full-button outline" id="calendarPrev" type="button">上个月</button><button class="full-button outline" id="calendarNext" type="button">下个月</button></div><div id="calendarGrid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:7px"></div></section></dialog>
+
+    <dialog id="backupDialog" class="sheet-dialog"><section class="sheet backup-sheet"><div class="sheet-handle"></div><div class="sheet-title-row"><div><p class="eyebrow">本机数据</p><h2>备份与恢复</h2></div><button class="close-button" id="closeBackup" aria-label="关闭">×</button></div><p class="dialog-copy">手机记录始终保存在本机。电脑开机时可直接更新 Word；电脑关机时，请同步到 OneDrive，电脑下次开机后会自动收取并更新原 Word。</p><button class="full-button" id="backupOneDrive">同步到 OneDrive</button><button class="full-button outline" id="backupNow">电脑已开机：直接更新 Word</button><button class="full-button outline" id="backupExport">导出手机备份文件</button><label class="full-button outline">导入手机备份文件<input id="backupImport" type="file" accept="application/json,.json" /></label><p class="storage-line" id="storageInfo"></p></section></dialog>
+
+    <dialog id="messageDialog" class="message-dialog"><section><div class="message-symbol" id="messageSymbol">!</div><h2 id="messageTitle">提示</h2><p id="messageBody"></p><div class="message-actions" id="messageActions"><button class="save-button" id="messageConfirm">知道了</button></div></section></dialog>
+
+    <div class="busy-layer" id="busyLayer" hidden><div class="busy-card"><div class="spinner"></div><strong id="busyTitle">正在生成 Word</strong><p id="busyText">正在整理照片，请不要关闭页面</p><div class="progress-track"><span id="busyProgress"></span></div></div></div>
+
+    <script src="docx.iife.js"></script>
+    <script src="app.js?v=11"></script>
+  </body>
+</html>
