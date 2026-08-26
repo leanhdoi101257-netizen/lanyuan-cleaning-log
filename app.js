@@ -438,7 +438,7 @@
     await openDatabase(); await navigator.storage?.persist?.(); await normaliseExistingTasks();
     try { await restoreCloudLogs(); } catch (error) { console.warn('Cloud restore unavailable.', error); setCloudInfo('暂时无法连接云端：本机记录没有丢失，稍后会重试'); }
     bindEvents(); await showDate(state.date);
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch((error) => console.warn('Service worker unavailable', error));
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=16').catch((error) => console.warn('Service worker unavailable', error));
   }
   safely(init, '应用没有启动成功');
 })();
