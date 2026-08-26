@@ -223,29 +223,6 @@
       done += 1; onProgress(done); return { ...log, tasks };
     }));
   }
-  async function backupMasterWord() {
-    if (backupInProgress) return;
-    backupInProgress = true;
-    const logs = (await allLogs()).filter(isRecorded);
-    if (!logs.length) { backupInProgress = false; showMessage('还没有可备份的记录', '请先保存至少一项文字或照片。', '＋'); return; }
-    $('#backupDialog').close();
-    showBusy('正在备份并更新电脑 Word', `正在整理 0 / ${logs.length} 天记录`);
-    try {
-      const prepared = await phoneLogsForComputer(logs, (done) => busyProgress(Math.round((done / logs.length) * 42), `正在整理 ${done} / ${logs.length} 天记录`));
-      busyProgress(48, '正在更新电脑中的原始 Word，请保持页面打开');
-      const response = await fetchWithTimeout('/api/sync-master', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ logs: prepared }) });
-      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || '电脑没有完成 Word 更新');
-      const result = await response.json();
-      busyProgress(100, '电脑 Word 已更新'); hideBusy();
-      showMessage('备份完成', `已将手机中的 ${result.days} 天记录和照片写入电脑的“航空城蘭园保洁服务日志.docx”。现在可直接点“下载已备份 Word”。`, '✓');
-    } catch (error) {
-      console.warn(error); hideBusy();
-      const detail = error.name === 'AbortError' ? '连接等待超时，请确认电脑开机且网址仍可打开。' : (error.message || '电脑没有完成 Word 更新');
-      showMessage('备份没有完成', `${detail} 手机里的记录没有丢失，请稍后重试。`, '×');
-    } finally {
-      backupInProgress = false;
-    }
-  }
   async function exportWord() {
     showBusy('正在准备手机下载', '正在确认电脑 Word 已备份');
     try {
@@ -314,7 +291,13 @@
         showMessage('请在 OneDrive 中确认保存', '已打开手机分享面板：请选择“OneDrive”，保存位置选“保洁日志同步”。电脑下次开机后会自动写入原 Word。', '☁');
         return;
       } catch (error) {
-        if (error?.name === 'AbortError') { showMessage('还没有上传', '你取消了分享。手机记录仍已安全保存在本机。', 'i'); return; }
+        // Android browsers sometimes close the share panel without handing the
+        // file to OneDrive.  Always leave a usable file in Downloads instead
+        // of presenting a dead-end “cancelled” error.
+        console.warn('OneDrive share sheet did not finish; downloading file instead.', error);
+        downloadBlob(file, file.name);
+        showMessage('同步文件已下载', '手机没有完成 OneDrive 分享，所以同步文件已自动保存到“下载”。请打开 OneDrive，点“+”上传，选择这个文件并保存到“保洁日志同步”文件夹。电脑随后会自动更新 Word。', '☁');
+        return;
       }
     }
     downloadBlob(file, file.name);
@@ -350,8 +333,7 @@
     $('#closeArchive').onclick = () => $('#archiveDialog').close(); $('#closeBackup').onclick = () => $('#backupDialog').close();
     $('#archiveList').onclick = (event) => { const row = event.target.closest('[data-open-date]'); if (row) { $('#archiveDialog').close(); safely(() => showDate(row.dataset.openDate), '无法打开这一天'); } };
     $('#backupExport').onclick = () => safely(exportBackup, '备份没有导出成功'); $('#backupOneDrive').onclick = () => safely(shareBackupToOneDrive, 'OneDrive 同步文件没有准备成功'); $('#backupImport').onchange = (event) => safely(() => importBackup(event.target.files[0]), '备份没有导入成功');
-    $('#backupNow').onclick = () => safely(backupMasterWord, '备份没有完成');
-    $('#moreButton').onclick = () => showMessage('保洁日志', '保存记录后，先点“备份到电脑并更新 Word”，再点“下载已备份 Word”。电脑关机时，手机里的记录不会丢失。', 'i');
+    $('#moreButton').onclick = () => showMessage('保洁日志', '保存当天记录后，点底部“备份”，再点“同步到 OneDrive”。电脑开机后会自动更新 Word。', 'i');
   }
   async function init() {
     await openDatabase(); await navigator.storage?.persist?.(); await normaliseExistingTasks(); bindEvents(); await showDate(state.date);

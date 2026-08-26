@@ -95,13 +95,13 @@
     <dialog id="archiveDialog" class="sheet-dialog"><section class="sheet archive-sheet"><div class="sheet-handle"></div><div class="sheet-title-row"><div><p class="eyebrow">已保存</p><h2>历史记录</h2></div><button class="close-button" id="closeArchive" aria-label="关闭">×</button></div><div id="archiveList" class="archive-list"></div></section></dialog>
     <dialog id="dateDialog" class="sheet-dialog"><section class="sheet"><div class="sheet-handle"></div><div class="sheet-title-row"><div><p class="eyebrow">选择日期</p><h2 id="calendarTitle">2026年8月</h2></div><button class="close-button" id="closeCalendar" type="button" aria-label="关闭">×</button></div><div style="display:flex;gap:10px;margin:16px 0"><button class="full-button outline" id="calendarPrev" type="button">上个月</button><button class="full-button outline" id="calendarNext" type="button">下个月</button></div><div id="calendarGrid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:7px"></div></section></dialog>
 
-    <dialog id="backupDialog" class="sheet-dialog"><section class="sheet backup-sheet"><div class="sheet-handle"></div><div class="sheet-title-row"><div><p class="eyebrow">本机数据</p><h2>备份与恢复</h2></div><button class="close-button" id="closeBackup" aria-label="关闭">×</button></div><p class="dialog-copy">手机记录始终保存在本机。电脑开机时可直接更新 Word；电脑关机时，请同步到 OneDrive，电脑下次开机后会自动收取并更新原 Word。</p><button class="full-button" id="backupOneDrive">同步到 OneDrive</button><button class="full-button outline" id="backupNow">电脑已开机：直接更新 Word</button><button class="full-button outline" id="backupExport">导出手机备份文件</button><label class="full-button outline">导入手机备份文件<input id="backupImport" type="file" accept="application/json,.json" /></label><p class="storage-line" id="storageInfo"></p></section></dialog>
+    <dialog id="backupDialog" class="sheet-dialog"><section class="sheet backup-sheet"><div class="sheet-handle"></div><div class="sheet-title-row"><div><p class="eyebrow">安全同步</p><h2>同步到电脑 Word</h2></div><button class="close-button" id="closeBackup" aria-label="关闭">×</button></div><p class="dialog-copy">手机记录先保存在本机。点下方按钮后请选择 OneDrive；保存到“保洁日志同步”文件夹。电脑开机后会自动收取并更新原 Word。</p><button class="full-button" id="backupOneDrive">同步到 OneDrive（电脑自动更新 Word）</button><button class="full-button outline" id="backupExport">导出手机备份文件</button><label class="full-button outline">导入手机备份文件<input id="backupImport" type="file" accept="application/json,.json" /></label><p class="storage-line" id="storageInfo"></p></section></dialog>
 
     <dialog id="messageDialog" class="message-dialog"><section><div class="message-symbol" id="messageSymbol">!</div><h2 id="messageTitle">提示</h2><p id="messageBody"></p><div class="message-actions" id="messageActions"><button class="save-button" id="messageConfirm">知道了</button></div></section></dialog>
 
     <div class="busy-layer" id="busyLayer" hidden><div class="busy-card"><div class="spinner"></div><strong id="busyTitle">正在生成 Word</strong><p id="busyText">正在整理照片，请不要关闭页面</p><div class="progress-track"><span id="busyProgress"></span></div></div></div>
 
-    <script src="docx.iife.js"></script>
-    <script src="app.js?v=11"></script>
+    <script src="vendor/docx.iife.js"></script>
+    <script src="app.js?v=12"></script>
   </body>
 </html>
