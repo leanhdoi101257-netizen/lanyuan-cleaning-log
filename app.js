@@ -151,7 +151,14 @@
     showBusy('正在保存到云端', `正在上传 0 / ${logs.length} 天记录`);
     let done = 0;
     for (const log of logs) { await syncOneLogToCloud(log); done += 1; busyProgress(Math.round(done / logs.length * 100), `已保存 ${done} / ${logs.length} 天记录`); }
-    hideBusy(); $('#backupDialog').close(); showMessage('云端已保存', `${logs.length} 天记录和照片已安全保存。电脑开机后会自动更新 Word。`, '☁');
+    // The user explicitly chose a phone-as-inbox workflow.  Clear only after
+    // every selected day has acknowledged a successful cloud upload; a failed
+    // upload throws above and leaves all phone data intact for retry.
+    busyProgress(96, '云端已确认，正在清空这台手机的已备份记录');
+    for (const log of logs) await deleteLocal(log.date);
+    await showDate(state.date);
+    hideBusy(); $('#backupDialog').close();
+    showMessage('云端已保存，手机已清空', `${logs.length} 天记录和照片已成功上传云端，已从这台手机清除。电脑开机后双击同步文件即可写入 Word。`, '✓');
   }
 
   async function deleteLog(date) {
@@ -432,13 +439,13 @@
     $('#closeArchive').onclick = () => $('#archiveDialog').close(); $('#closeBackup').onclick = () => $('#backupDialog').close();
     $('#archiveList').onclick = (event) => { const row = event.target.closest('[data-open-date]'); if (row) { $('#archiveDialog').close(); safely(() => showDate(row.dataset.openDate), '无法打开这一天'); } };
     $('#backupExport').onclick = () => safely(exportBackup, '备份没有导出成功'); $('#backupCloud').onclick = () => safely(syncAllToCloud, '云端同步没有完成'); $('#backupImport').onchange = (event) => safely(() => importBackup(event.target.files[0]), '备份没有导入成功');
-    $('#moreButton').onclick = () => showMessage('保洁日志', '保存当天记录后会自动上传云端。也可以点底部“备份”立即同步；电脑开机后会自动更新 Word。', 'i');
+    $('#moreButton').onclick = () => showMessage('保洁日志', '保存当天记录后会自动上传云端。点底部“备份”里的“同步云端并清空手机记录”后，已成功上传的数据会从手机清除；电脑开机后双击同步文件即可写入 Word。', 'i');
   }
   async function init() {
     await openDatabase(); await navigator.storage?.persist?.(); await normaliseExistingTasks();
     try { await restoreCloudLogs(); } catch (error) { console.warn('Cloud restore unavailable.', error); setCloudInfo('暂时无法连接云端：本机记录没有丢失，稍后会重试'); }
     bindEvents(); await showDate(state.date);
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=16').catch((error) => console.warn('Service worker unavailable', error));
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=17').catch((error) => console.warn('Service worker unavailable', error));
   }
   safely(init, '应用没有启动成功');
 })();
