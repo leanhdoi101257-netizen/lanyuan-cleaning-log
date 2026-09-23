@@ -9,6 +9,7 @@
   let backupInProgress = false;
   let cloudClient = null;
   let cloudReadyPromise = null;
+  const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
   function localDate(value) {
     const date = new Date(value);
@@ -75,6 +76,19 @@
     const { url, anonKey } = cloudSettings();
     return /^https:\/\/[\w-]+\.supabase\.co$/.test(url) && anonKey.length > 30 && !!window.supabase;
   }
+  function isCloudAuthError(error) {
+    const status = Number(error?.status || error?.statusCode || 0);
+    const text = `${error?.code || ''} ${error?.message || ''}`.toLowerCase();
+    return status === 401 || status === 403 || /jwt|refresh.?token|session.*expired|invalid.*token/.test(text);
+  }
+  async function resetCloudSession() {
+    const previous = cloudClient;
+    cloudClient = null;
+    cloudReadyPromise = null;
+    if (previous) {
+      try { await previous.auth.signOut({ scope: 'local' }); } catch (_) { /* Local reset is best-effort. */ }
+    }
+  }
   function setCloudInfo(text) {
     const label = $('#cloudInfo');
     if (label) label.textContent = text;
@@ -88,7 +102,15 @@
         const client = supabase.createClient(url, anonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false } });
         const { data: sessionData, error: sessionError } = await client.auth.getSession();
         if (sessionError) throw sessionError;
-        if (!sessionData.session) {
+        let session = sessionData.session;
+        if (session) {
+          const { error: userError } = await client.auth.getUser();
+          if (userError && isCloudAuthError(userError)) {
+            try { await client.auth.signOut({ scope: 'local' }); } catch (_) { /* Continue with a new anonymous session. */ }
+            session = null;
+          } else if (userError) throw userError;
+        }
+        if (!session) {
           const { error } = await client.auth.signInAnonymously();
           if (error) throw error;
         }
@@ -96,7 +118,8 @@
         return client;
       })();
     }
-    return cloudReadyPromise;
+    try { return await cloudReadyPromise; }
+    catch (error) { cloudClient = null; cloudReadyPromise = null; throw error; }
   }
   async function logForCloud(log) {
     return {
@@ -110,13 +133,25 @@
   }
   async function syncOneLogToCloud(log) {
     if (!cloudConfigured() || !isRecorded(log)) return false;
-    const client = await ensureCloudSession();
     const payload = await logForCloud(log);
-    const { error } = await client.from('cleaning_logs').upsert({ date: payload.date, payload }, { onConflict: 'device_id,date' });
-    if (error) throw error;
-    localStorage.setItem('cleaning-log-cloud-synced-at', payload.updatedAt);
-    setCloudInfo(`云端已保存：${formatFullDate(payload.date)}`);
-    return true;
+    let lastError = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const client = await ensureCloudSession();
+        const { error } = await client.from('cleaning_logs').upsert({ date: payload.date, payload }, { onConflict: 'device_id,date' });
+        if (error) throw error;
+        localStorage.setItem('cleaning-log-cloud-synced-at', payload.updatedAt);
+        setCloudInfo(`云端已保存：${formatFullDate(payload.date)}`);
+        return true;
+      } catch (error) {
+        lastError = error;
+        if (isCloudAuthError(error)) await resetCloudSession();
+        else cloudReadyPromise = null;
+        if (attempt < 2) await wait(900 * (attempt + 1));
+      }
+    }
+    if (lastError && typeof lastError === 'object') lastError.cloudDate = payload.date;
+    throw lastError || new Error('云端没有返回上传结果');
   }
   async function remoteLogToLocal(payload) {
     if (!payload || typeof payload.date !== 'string' || !Array.isArray(payload.tasks) || payload.tasks.length !== 8) return null;
@@ -145,15 +180,19 @@
     return restored;
   }
   async function syncAllToCloud() {
+    if (!window.supabase) { const error = new Error('云端连接组件没有加载'); error.code = 'CLOUD_LIBRARY_MISSING'; throw error; }
     if (!cloudConfigured()) throw new Error('云端还没有设置完成。请先完成电脑上的 Supabase 设置。');
     const logs = (await allLogs()).filter(isRecorded);
     if (!logs.length) { showMessage('还没有可同步的记录', '先保存至少一项文字或照片。', '＋'); return; }
     showBusy('正在保存到云端', `正在上传 0 / ${logs.length} 天记录`);
     let done = 0;
-    for (const log of logs) { await syncOneLogToCloud(log); done += 1; busyProgress(Math.round(done / logs.length * 100), `已保存 ${done} / ${logs.length} 天记录`); }
-    // The user explicitly chose a phone-as-inbox workflow.  Clear only after
-    // every selected day has acknowledged a successful cloud upload; a failed
-    // upload throws above and leaves all phone data intact for retry.
+    for (const log of logs) {
+      try { await syncOneLogToCloud(log); }
+      catch (error) { if (error && typeof error === 'object') error.cloudDate = log.date; throw error; }
+      done += 1; busyProgress(Math.round(done / logs.length * 100), `已保存 ${done} / ${logs.length} 天记录`);
+    }
+    // Clear only after every selected day has acknowledged a successful cloud
+    // upload; any upload error above leaves phone data intact for retry.
     busyProgress(96, '云端已确认，正在清空这台手机的已备份记录');
     for (const log of logs) await deleteLocal(log.date);
     await showDate(state.date);
@@ -253,6 +292,13 @@
   function errorMessage(error, context) {
     if (error?.name === 'QuotaExceededError') return ['手机空间不够', '照片保存在本机。请先导出备份，再清理不需要的记录或手机空间。'];
     if (error?.name === 'NotAllowedError') return ['无法读取照片', '请允许浏览器访问相机或相册后再试一次。'];
+    const detail = String(error?.message || error?.details || '').trim();
+    const dateText = error?.cloudDate ? `${formatFullDate(error.cloudDate)}没有上传成功。` : '';
+    if (error?.code === 'CLOUD_LIBRARY_MISSING') return ['云端组件没有加载', '请关闭网站后重新打开。新版已把云端组件保存在网站本身，不再依赖外部 CDN。手机记录没有丢失。'];
+    if (!navigator.onLine || /failed to fetch|networkerror|network request failed|load failed/i.test(detail)) return ['网络没有连上云端', `${dateText}请切换一次 Wi-Fi 或移动数据后重试。手机记录和照片仍保留着。`];
+    if (isCloudAuthError(error)) return ['云端登录状态已过期', `${dateText}请关闭网站后重新打开，再点一次同步。手机记录和照片仍保留着。`];
+    if (Number(error?.status) === 413 || /payload.*large|request.*large|too large/i.test(detail)) return ['照片数据太大', `${dateText}请先导出手机备份文件，再把当天照片重新选择一次后重试。`];
+    if (context?.includes('云端')) return [context, `${dateText}手机记录没有丢失。错误原因：${detail || error?.code || '云端暂时没有响应'}。`];
     return [context || '操作没有完成', '数据没有丢失。请稍后重试；如果仍失败，请先导出备份。'];
   }
   async function safely(work, context) { try { await work(); } catch (error) { console.error(error); hideBusy(); const [title, body] = errorMessage(error, context); showMessage(title, body, '×'); } }
@@ -445,7 +491,7 @@
     await openDatabase(); await navigator.storage?.persist?.(); await normaliseExistingTasks();
     try { await restoreCloudLogs(); } catch (error) { console.warn('Cloud restore unavailable.', error); setCloudInfo('暂时无法连接云端：本机记录没有丢失，稍后会重试'); }
     bindEvents(); await showDate(state.date);
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=17').catch((error) => console.warn('Service worker unavailable', error));
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=19').catch((error) => console.warn('Service worker unavailable', error));
   }
   safely(init, '应用没有启动成功');
 })();
