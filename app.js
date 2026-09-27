@@ -74,7 +74,7 @@
   }
   function cloudConfigured() {
     const { url, anonKey } = cloudSettings();
-    return /^https:\/\/[\w-]+\.supabase\.co$/.test(url) && anonKey.length > 30 && !!window.supabase;
+    return url === 'https://lanyuan-supabase-relay.netlify.app' && anonKey.length > 30 && !!window.supabase;
   }
   function isCloudAuthError(error) {
     const status = Number(error?.status || error?.statusCode || 0);
@@ -491,7 +491,7 @@
     await openDatabase(); await navigator.storage?.persist?.(); await normaliseExistingTasks();
     try { await restoreCloudLogs(); } catch (error) { console.warn('Cloud restore unavailable.', error); setCloudInfo('暂时无法连接云端：本机记录没有丢失，稍后会重试'); }
     bindEvents(); await showDate(state.date);
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=19').catch((error) => console.warn('Service worker unavailable', error));
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=20').catch((error) => console.warn('Service worker unavailable', error));
   }
   safely(init, '应用没有启动成功');
 })();
